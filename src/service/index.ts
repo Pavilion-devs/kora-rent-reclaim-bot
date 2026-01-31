@@ -84,8 +84,16 @@ export class KoraReclaimService {
     this.isRunning = true;
     log.info('Service started');
 
-    // Run initial cycles
-    this.runMonitorCycle();
+    // Run initial discovery + monitor on startup
+    this.runStartupCycle();
+  }
+
+  /**
+   * Run discovery then monitor on first start
+   */
+  private async runStartupCycle(): Promise<void> {
+    await this.runDiscoveryCycle();
+    await this.runMonitorCycle();
   }
 
   /**
@@ -260,26 +268,47 @@ async function main() {
 
   // Handle graceful shutdown
   process.on('SIGINT', async () => {
-    console.log('\nReceived SIGINT, shutting down...');
+    console.log('\n\nShutting down bot...');
     await service.shutdown();
     process.exit(0);
   });
 
   process.on('SIGTERM', async () => {
-    console.log('\nReceived SIGTERM, shutting down...');
+    console.log('\n\nShutting down bot...');
     await service.shutdown();
     process.exit(0);
   });
 
   try {
     await service.initialize();
+
+    const config = getConfig();
+    console.log('');
+    console.log('╔══════════════════════════════════════════════╗');
+    console.log('║       Kora Rent-Reclaim Bot  ·  Running      ║');
+    console.log('╠══════════════════════════════════════════════╣');
+    console.log(`║  Network:     ${config.network.padEnd(30)} ║`);
+    console.log(`║  Signer:      ${(config.koraSignerPubkey || 'not set').slice(0, 8).padEnd(30)}${config.koraSignerPubkey ? '...' : '   '} ║`);
+    console.log(`║  Monitor:     every ${String(config.monitorIntervalMinutes).padEnd(24)} min ║`);
+    console.log(`║  Auto-reclaim: ${String(config.autoReclaim).padEnd(29)} ║`);
+    console.log(`║  Dry-run:     ${String(config.dryRun).padEnd(30)} ║`);
+    console.log('╠══════════════════════════════════════════════╣');
+    console.log('║  The bot will now:                           ║');
+    console.log('║   1. Discover sponsored accounts             ║');
+    console.log('║   2. Monitor for closures                    ║');
+    console.log('║   3. Auto-reclaim rent when detected         ║');
+    console.log('║                                              ║');
+    console.log('║  Close an account in another terminal to     ║');
+    console.log('║  see the bot detect and reclaim it.          ║');
+    console.log('╠══════════════════════════════════════════════╣');
+    console.log('║  Press Ctrl+C to stop                        ║');
+    console.log('╚══════════════════════════════════════════════╝');
+    console.log('');
+
     service.start();
 
-    console.log('\n=== Kora Reclaim Service Running ===');
-    console.log('Press Ctrl+C to stop\n');
-
   } catch (error) {
-    console.error('Failed to start service:', error);
+    console.error('Failed to start bot:', error);
     process.exit(1);
   }
 }

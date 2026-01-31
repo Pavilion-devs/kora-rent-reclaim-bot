@@ -163,6 +163,39 @@ export async function reclaimSingleAccount(
   try {
     // Get current on-chain info
     const onChainInfo = await getAccountInfo(pubkey);
+
+    // If account no longer exists on-chain but has rent recorded in DB,
+    // the rent was already recovered when the account was closed.
+    // Record this as a successful reclaim.
+    if (!onChainInfo.exists && account.rentLamports > 0) {
+      log.reclaim(`Account already closed on-chain, rent was recovered at closure`, {
+        pubkey,
+        rentLamports: account.rentLamports,
+      });
+
+      recordReclaimTransaction({
+        accountPubkey: pubkey,
+        txSignature: 'closed-on-chain',
+        lamportsReclaimed: account.rentLamports,
+        reclaimedAt: new Date(),
+        success: true,
+        treasuryPubkey: treasuryPubkey.toBase58(),
+      });
+
+      if (!dryRun) {
+        updateAccountStatus(pubkey, AccountStatus.RECLAIMED);
+        updateAccountRent(pubkey, 0);
+      }
+
+      return {
+        success: true,
+        accountPubkey: pubkey,
+        txSignature: 'closed-on-chain',
+        lamportsReclaimed: account.rentLamports,
+        dryRun,
+      };
+    }
+
     const lamportsToReclaim = onChainInfo.exists ? onChainInfo.lamports : account.rentLamports;
 
     if (lamportsToReclaim === 0) {

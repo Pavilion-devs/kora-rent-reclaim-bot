@@ -154,10 +154,49 @@ export async function getKoraNodeInfo(koraRpcUrl: string): Promise<KoraConfig | 
   }
 }
 
+/**
+ * Sign and send a transaction through Kora (Kora adds fee payer signature)
+ *
+ * @param koraRpcUrl - The Kora RPC endpoint
+ * @param serializedTx - Base64-encoded serialized transaction (partially signed, missing fee payer sig)
+ * @returns Transaction signature
+ */
+export async function signAndSendTransaction(
+  koraRpcUrl: string,
+  serializedTx: string
+): Promise<string> {
+  log.info('Sending transaction to Kora for signing');
+
+  const result = await callKoraRpc<{
+    signature?: string;
+    signed_transaction?: string;
+    signer_pubkey?: string;
+  }>(
+    koraRpcUrl,
+    'signAndSendTransaction',
+    { transaction: serializedTx }
+  );
+
+  // Kora returns signed_transaction (base64 encoded) and signer_pubkey.
+  // Extract the tx signature from the first 64 bytes of the signed transaction.
+  let txSignature = result.signature || '';
+  if (!txSignature && result.signed_transaction) {
+    const bs58 = await import('bs58');
+    const txBytes = Buffer.from(result.signed_transaction, 'base64');
+    // First byte is the signature count, signatures start at byte 1, each 64 bytes
+    const sigBytes = txBytes.slice(1, 65);
+    txSignature = bs58.default.encode(sigBytes);
+  }
+
+  log.info(`Transaction signed and sent via Kora: ${txSignature}`);
+  return txSignature;
+}
+
 export default {
   getPayerSigner,
   getKoraConfig,
   getSupportedTokens,
   isKoraNodeReachable,
   getKoraNodeInfo,
+  signAndSendTransaction,
 };

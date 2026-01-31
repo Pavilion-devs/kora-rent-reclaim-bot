@@ -191,13 +191,14 @@ function detectStatusChange(
   }
 
   // Account was closed (no longer exists on-chain)
+  // Preserve rentLamports so reclaim can record the recovered amount
   if (!onChain.exists && tracked.status !== AccountStatus.CLOSED) {
     return {
       pubkey: tracked.pubkey,
       previousStatus: tracked.status,
       newStatus: AccountStatus.CLOSED,
       previousRent: tracked.rentLamports,
-      newRent: 0,
+      newRent: tracked.rentLamports,
       reason: 'Account no longer exists on-chain',
     };
   }

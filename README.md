@@ -1,432 +1,238 @@
 # Kora Rent-Reclaim Bot
 
-> Automated rent recovery for Kora-sponsored Solana accounts
+Automated rent recovery for Kora-sponsored Solana accounts.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Solana](https://img.shields.io/badge/Solana-Devnet%20%7C%20Mainnet-blue)](https://solana.com)
+![Kora Rent-Reclaim Dashboard](image.png)
 
-## Overview
+## The Problem
 
-**Kora** is Solana's signing infrastructure that enables apps to sponsor transactions and account creation. When a Kora node sponsors account creation, SOL is locked as **rent** to keep those accounts alive on-chain.
+[Kora](https://launch.solana.com/docs/kora/operators) lets apps sponsor transactions on Solana so users don't need SOL. When Kora sponsors account creation, SOL gets locked as **rent** (~0.002 SOL per token account). Over time, many of these accounts get closed or abandoned, but the rent is never tracked or recovered. This is silent capital loss for operators.
 
-Over time, many of these accounts become:
-- Inactive (no recent activity)
-- Closed (account deleted)
-- No longer needed by users
+## How It Works
 
-In most cases, operators don't actively track or reclaim this rent, leading to **silent capital loss**.
-
-This bot solves that operational gap by:
-- 🔍 **Monitoring** accounts sponsored by your Kora node
-- 🔔 **Detecting** when accounts are closed or eligible for cleanup
-- 💰 **Reclaiming** locked rent SOL back to your operator treasury
-- 📊 **Reporting** on where your rent went and what was recovered
-
-## How Kora Works (And Where Rent Locking Happens)
-
-Based on the [Kora Operators Documentation](https://launch.solana.com/docs/kora/operators), Kora is a **paymaster service** that sponsors Solana transaction fees for your users.
-
-### The Sponsorship Flow
+### Kora Sponsorship and Rent Locking
 
 ```
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│    User      │───▶│  Kora Node   │───▶│   Solana     │
-│  (no SOL)    │    │ (Fee Payer)  │    │  Network     │
-└──────────────┘    └──────────────┘    └──────────────┘
-                           │
-                           ▼
-                    ┌──────────────┐
-                    │  New Account │
-                    │  Created     │
-                    │  (Rent Paid) │
-                    └──────────────┘
+User creates account  -->  Kora signs as fee payer  -->  SOL locked as rent
+                                                              |
+Account gets closed   -->  Rent SOL released         -->  Who tracks this?
 ```
 
-1. **User initiates transaction** - wants to create a token account, etc.
-2. **Kora node sponsors** - your **signer keypair** (configured in `signers.toml`) signs as fee payer, covering:
-   - Transaction fees (~0.000005 SOL)
-   - **Rent deposit** (~0.00203 SOL for token accounts)
-3. **Account created** - rent SOL is now locked in the account
-4. **User interacts** - uses the account normally
-5. **Account closed** - when user is done, the rent should return
+When a Kora node sponsors a transaction, the **signer keypair** (configured in `signers.toml`) pays:
+- Transaction fees (~0.000005 SOL)
+- **Rent deposit** (~0.00203 SOL per token account)
 
-### Key Kora Concepts
+The rent stays locked until the account is closed. Operators have no visibility into how much rent is locked across hundreds or thousands of sponsored accounts.
 
-From the [JSON-RPC API](https://launch.solana.com/docs/kora/json-rpc-api):
-- **`getPayerSigner`** - Returns your Kora node's fee payer address
-- **`signAndSendTransaction`** - Signs and broadcasts gasless transactions
-- **Signer Configuration** - Each operator configures their own keypair in `signers.toml`
-
-### The Problem
-
-When step 5 happens (or should happen), that rent often goes:
-- ❌ Nowhere (account closed by user, rent goes to them)
-- ❌ Unclaimed (account eligible but nobody closes it)
-- ❌ Forgotten (operator has no visibility)
-
-### Our Solution
+### What This Bot Does
 
 ```
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│   Kora Bot   │───▶│   Monitor    │───▶│   Reclaim    │
-│              │    │   Accounts   │    │   Rent SOL   │
-└──────────────┘    └──────────────┘    └──────────────┘
-        │                                       │
-        ▼                                       ▼
-┌──────────────┐                        ┌──────────────┐
-│   Database   │                        │   Treasury   │
-│   Tracking   │                        │   Wallet     │
-└──────────────┘                        └──────────────┘
+npm run bot
 ```
 
-## Features
+One command. The bot runs continuously and handles everything:
 
-### Core Capabilities
-- ✅ **Account Discovery** - Scan Kora node's transaction history to find sponsored accounts
-- ✅ **Continuous Monitoring** - Track account status changes (active → closed → reclaimed)
-- ✅ **Safe Reclaim** - Multiple safety checks before any reclaim operation
-- ✅ **Whitelist/Blacklist** - Protect specific accounts from reclaim
-- ✅ **Dry Run Mode** - Test operations without executing transactions
+1. **Discovers** all accounts where your Kora signer paid rent
+2. **Monitors** those accounts every minute for closures
+3. **Reclaims** rent automatically when a closure is detected
+4. **Reports** what was reclaimed and how much
 
-### Interfaces
-- 🖥️ **CLI Tool** - Full-featured command-line interface
-- 🤖 **Telegram Bot** - Real-time alerts and remote control
-- ⏰ **Background Service** - Automated monitoring with cron scheduling
-- 📊 **Dashboard** - Web interface for visualization (coming soon)
+No manual CLI commands needed. Start it and it works.
 
-### Safety Features
-- Minimum dormancy period before reclaim
-- Minimum lamports threshold (avoid dust)
-- Whitelist for protected accounts
-- Blacklist for excluded programs
-- Dry run mode for testing
-- Comprehensive audit trail
-
-## Installation
+## Quick Start
 
 ### Prerequisites
-- Node.js 18+ 
-- npm or yarn
-- Solana CLI (optional, for keypair management)
 
-### Setup
+- Node.js 18+
+- A Solana keypair (`keypair.json`)
+- A running [Kora node](https://launch.solana.com/docs/kora/getting-started)
+
+### Install
 
 ```bash
-# Clone the repository
-cd kora-reclaim-bot
-
-# Install dependencies
+git clone <repo-url>
+cd kora-rent-reclaim-bot
 npm install
-
-# Copy environment template
-cp env.example .env
-
-# Edit configuration
-nano .env
 ```
 
-### Configuration
+### Configure
 
-Edit `.env` with your settings:
+Edit `.env`:
 
 ```bash
-# Solana Network
 SOLANA_NETWORK=devnet
 SOLANA_RPC_URL=https://api.devnet.solana.com
 
-# Kora Configuration (choose one option)
-# Option 1: If you know your signer address (from your signers.toml)
-KORA_SIGNER_PUBKEY=YourKoraSignerPubkeyHere
+# Your Kora signer address (from signers.toml)
+KORA_SIGNER_PUBKEY=<your-signer-pubkey>
+KORA_RPC_URL=http://localhost:8082
 
-# Option 2: If you have a running Kora node, fetch signer automatically
-KORA_RPC_URL=http://your-kora-node:8080
-
-# Operator keypair (for signing reclaim transactions)
+# Operator keypair for signing reclaim transactions
 OPERATOR_KEYPAIR_PATH=./keypair.json
 
-# Where reclaimed SOL goes (defaults to operator wallet)
-TREASURY_PUBKEY=
-
-# Safety settings
-DRY_RUN=true          # Start with dry run enabled!
-AUTO_RECLAIM=false    # Manual reclaim initially
-MIN_DORMANCY_DAYS=7   # Wait 7 days after closure
+# Bot settings
+MONITOR_INTERVAL_MINUTES=1    # How often to check (minutes)
+MIN_DORMANCY_DAYS=0           # Days to wait after closure before reclaiming
+MIN_RECLAIM_LAMPORTS=0        # Minimum lamports to bother reclaiming
+DRY_RUN=false                 # Set true to simulate without executing
+AUTO_RECLAIM=true             # Automatically reclaim when closures detected
 ```
 
-### Finding Your Kora Signer Address
-
-**If you're running a Kora node**, your signer address is configured in `signers.toml`. You can also fetch it via the Kora RPC API:
+### Run
 
 ```bash
-# Using our CLI (if you have a running Kora node)
-npm run cli -- kora-info --url http://your-kora-node:8080
-
-# Or using curl
-curl -X POST http://your-kora-node:8080 \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"getPayerSigner","params":{}}'
+# Start the bot (discovers, monitors, auto-reclaims)
+npm run bot
 ```
 
-### Generate a Test Keypair (Devnet)
+That's it. The bot will discover sponsored accounts on startup, then monitor and reclaim on a loop.
+
+## Demo: Full Lifecycle on Devnet
+
+This demo shows the complete cycle: create accounts through Kora, start the bot, close an account, watch the bot reclaim the rent.
+
+### 1. Start Kora node
 
 ```bash
-# Using Solana CLI
-solana-keygen new -o keypair.json
+cd ~/kora-demo
 
-# Get some devnet SOL
-solana airdrop 2 $(solana-keygen pubkey keypair.json) --url devnet
+KORA_SIGNER_KEY="<your-private-key>" \
+~/kora-binary --rpc-url "https://api.devnet.solana.com" \
+  rpc start --signers-config signers.toml --port 8082
 ```
 
-## Usage
+**Note:** You must use `--rpc-url` flag. Without it, Kora defaults to localhost:8899.
 
-### CLI Commands
+### 2. Create sponsored accounts
 
 ```bash
-# View all commands
-npm run cli -- --help
-
-# Show current status
-npm run cli -- status
-
-# Fetch Kora node info (signer address)
-npm run cli -- kora-info --url http://your-kora-node:8080
-
-# Discover sponsored accounts
-npm run cli -- discover --signer <KORA_SIGNER_PUBKEY>
-
-# List tracked accounts
-npm run cli -- list
-npm run cli -- list --status closed
-
-# Check accounts for changes
-npm run cli -- check
-
-# View eligible accounts for reclaim
-npm run cli -- report
-
-# Reclaim a specific account (dry run)
-npm run cli -- reclaim <ACCOUNT_PUBKEY> --dry-run
-
-# Reclaim all eligible accounts (dry run)
-npm run cli -- reclaim --all --dry-run
-
-# Actually reclaim (disable dry run)
-npm run cli -- reclaim --all --force
-
-# Manage whitelist
-npm run cli -- whitelist --list
-npm run cli -- whitelist --add <PUBKEY> --reason "Active user account"
-npm run cli -- whitelist --remove <PUBKEY>
-
-# View reclaim history
-npm run cli -- history
-
-# Show configuration
-npm run cli -- config
+# Creates token accounts through Kora (Kora pays rent as fee payer)
+npm run demo:setup
 ```
 
-### Background Service
+### 3. Start the bot
 
 ```bash
-# Start the service
-npm run service
-
-# With PM2 (for production)
-pm2 start npm --name kora-reclaim -- run service
+npm run bot
 ```
 
-The service will:
-- Run account checks every N minutes (configurable)
-- Run discovery daily at midnight
-- Auto-reclaim if enabled
-- Log all activities
+The bot discovers the accounts and starts monitoring. Leave it running.
 
-### Telegram Bot
-
-1. Create a bot with [@BotFather](https://t.me/botfather)
-2. Get your chat ID (message [@userinfobot](https://t.me/userinfobot))
-3. Configure in `.env`:
+### 4. Close an account (in another terminal)
 
 ```bash
-TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
-TELEGRAM_ALERTS_ENABLED=true
+npm run demo:close
 ```
 
-4. Start the service - bot will be available!
+Watch the bot's terminal. Within 1 minute it will:
+- Detect the closure
+- Auto-reclaim the rent
+- Log the result
 
-**Telegram Commands:**
-- `/status` - Current statistics
-- `/accounts` - List tracked accounts
-- `/check` - Run account check
-- `/reclaim` - Reclaim eligible accounts
-- `/report` - Generate report
-- `/help` - All commands
+### 5. Verify
 
-## Understanding Solana Rent
-
-### What is Rent?
-
-Solana requires accounts to maintain a minimum balance to stay "rent-exempt". This prevents blockchain bloat from abandoned accounts.
-
-| Account Type | Typical Size | Minimum Rent |
-|-------------|--------------|--------------|
-| Token Account | 165 bytes | ~0.00203 SOL |
-| Empty Account | 0 bytes | ~0.00089 SOL |
-| Large Data | 1KB | ~0.00739 SOL |
-
-### When Can Rent Be Reclaimed?
-
-1. **Account Closure** - When an account is closed via `CloseAccount` instruction, all remaining lamports (including rent) go to a designated recipient
-
-2. **Empty Token Accounts** - Token accounts with 0 balance can be closed
-
-3. **Program-Owned Accounts** - Must use the program's close instruction
-
-### The Bot's Approach
-
+```bash
+npm run cli -- history   # Reclaim transaction history
+npm run cli -- list      # Account statuses
+npm run cli -- report    # Summary report
 ```
-1. Discover accounts where Kora was fee payer
-2. Track their lifecycle (active → inactive → closed)
-3. When closed + dormancy period passed:
-   - Verify account is truly closable
-   - Check whitelist/blacklist
-   - Execute reclaim transaction
-   - Record in audit log
+
+### 6. View the Dashboard
+
+After running the bot, you can view your results in a web dashboard:
+
+```bash
+cd dashboard
+npm run dev
+```
+
+Open the URL shown in your terminal to see tracked accounts, reclaim history, and stats.
+
+## CLI Reference
+
+The bot also includes a CLI for manual operations:
+
+```bash
+npm run cli -- discover --signer <PUBKEY>   # Find sponsored accounts
+npm run cli -- list                          # List tracked accounts
+npm run cli -- check                         # Check for status changes
+npm run cli -- reclaim --all                 # Reclaim all eligible
+npm run cli -- history                       # Reclaim history
+npm run cli -- report                        # Summary report
+npm run cli -- whitelist --add <PUBKEY>      # Protect an account
+npm run cli -- config                        # Show configuration
 ```
 
 ## Architecture
 
 ```
 src/
-├── core/
-│   ├── database.ts   # SQLite storage for tracking
-│   ├── solana.ts     # Solana RPC interactions
-│   ├── discovery.ts  # Find sponsored accounts
-│   ├── monitor.ts    # Track account changes
-│   └── reclaim.ts    # Execute reclaim operations
-├── cli/
-│   └── index.ts      # Command-line interface
-├── service/
-│   └── index.ts      # Background service
-├── telegram/
-│   └── bot.ts        # Telegram bot integration
-├── utils/
-│   ├── config.ts     # Configuration management
-│   └── logger.ts     # Logging utilities
-└── types/
-    └── index.ts      # TypeScript definitions
+  core/
+    discovery.ts    Scans Kora signer tx history, finds sponsored accounts
+    monitor.ts      Checks accounts on-chain, detects closures
+    reclaim.ts      Executes rent reclaim (token accounts, system accounts)
+    solana.ts       Solana RPC interactions, account close instructions
+    kora.ts         Kora JSON-RPC client (getPayerSigner, signAndSendTransaction)
+    database.ts     SQLite tracking (accounts, reclaim history, whitelist)
+  service/
+    index.ts        Background bot: cron-based discovery + monitor + auto-reclaim
+  cli/
+    index.ts        CLI interface for manual operations
+  types/
+    index.ts        TypeScript definitions
+scripts/
+  demo-setup.ts     Creates test mint + ATAs through Kora for demo
+  demo-close-account.ts  Closes a demo account to trigger reclaim
 ```
 
-## API Reference
+### How Reclaim Works
 
-### Programmatic Usage
+1. **Discovery**: Scans the Kora signer's transaction history via `getSignaturesForAddress`. For each transaction where the signer was fee payer, extracts created accounts (system create, token init, ATA create).
 
-```typescript
-import { 
-  discoverSponsoredAccounts,
-  checkAllAccounts,
-  reclaimAllEligible,
-  getStats 
-} from 'kora-reclaim-bot';
+2. **Monitoring**: Every N minutes, batch-checks all tracked accounts via `getMultipleAccountsInfo`. If an account no longer exists on-chain, marks it as `closed` and preserves the rent amount.
 
-// Discover accounts
-const discovery = await discoverSponsoredAccounts('KoraNodePubkey');
-console.log(`Found ${discovery.totalFound} accounts`);
+3. **Reclaim**: For closed accounts with rent > 0:
+   - If account is already gone (rent was returned at closure), records the reclaim
+   - If account is a token account (TOKEN_PROGRAM or TOKEN_2022), uses `createCloseAccountInstruction`
+   - If account is system-owned, transfers remaining lamports
+   - Updates status to `reclaimed`, logs the transaction
 
-// Check for changes
-const check = await checkAllAccounts();
-console.log(`${check.statusChanges.length} accounts changed status`);
+### Safety
 
-// Reclaim (with dry run)
-const reclaim = await reclaimAllEligible(true);
-console.log(`Would reclaim ${reclaim.totalLamportsReclaimed} lamports`);
+- **Whitelist**: Protect accounts from ever being reclaimed
+- **Dormancy period**: Configurable wait time after closure before reclaiming
+- **Minimum threshold**: Skip dust amounts
+- **Dry run mode**: Simulate everything without executing transactions
+- **Audit trail**: Every reclaim is recorded with timestamp, amount, and tx signature
 
-// Get statistics
-const stats = getStats();
-console.log(`Total rent locked: ${stats.totalRentLocked} lamports`);
+## Kora Node Config for Demo
+
+Your `kora.toml` needs these settings for the demo to work:
+
+```toml
+[validation.price]
+type = "free"                    # No token payment required
+
+[validation]
+max_allowed_lamports = 10000000  # Must be >= 2039280 (ATA rent)
 ```
 
-## Safety Considerations
+## Tech Stack
 
-### Before Running on Mainnet
-
-1. **Test on Devnet First** - Always test with devnet SOL
-2. **Enable Dry Run** - Start with `DRY_RUN=true`
-3. **Set Reasonable Dormancy** - 7+ days recommended
-4. **Whitelist Active Accounts** - Protect important accounts
-5. **Review Logs** - Check what would be reclaimed
-6. **Start Manual** - Set `AUTO_RECLAIM=false` initially
-
-### What the Bot Will NOT Reclaim
-
-- Accounts with recent activity
-- Whitelisted accounts
-- Accounts below minimum threshold
-- Accounts not meeting dormancy period
-- Accounts that fail safety checks
-
-## Development
-
-```bash
-# Install dependencies
-npm install
-
-# Run in development mode
-npm run dev
-
-# Build for production
-npm run build
-
-# Run tests
-npm test
-
-# Lint code
-npm run lint
-```
-
-## Troubleshooting
-
-### "Keypair file not found"
-- Ensure `OPERATOR_KEYPAIR_PATH` points to a valid JSON keypair file
-- Generate one with `solana-keygen new -o keypair.json`
-
-### "RPC rate limiting"
-- Use a dedicated RPC provider (Helius, QuickNode, etc.)
-- Increase `MONITOR_INTERVAL_MINUTES`
-
-### "Account not eligible"
-- Check the dormancy period hasn't passed
-- Verify account is actually closed
-- Check whitelist/blacklist
-
-### "No accounts discovered"
-- Verify `KORA_NODE_PUBKEY` is correct
-- Ensure the node has sponsored transactions
-- Try increasing the transaction scan limit
-
-## Contributing
-
-Contributions welcome! Please read our contributing guidelines first.
-
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Open a Pull Request
-
-## License
-
-MIT License - see LICENSE file for details.
+- **TypeScript / Node.js** - Bot and service logic
+- **SQLite** (sql.js) - Account tracking and history
+- **@solana/web3.js** - Solana RPC interactions
+- **@solana/spl-token** - Token account close instructions
+- **node-cron** - Scheduled monitoring
+- **Kora JSON-RPC** - Signer discovery and sponsored transactions
 
 ## Resources
 
-- [Kora Documentation](https://launch.solana.com/docs/kora/operators)
+- [Kora Operator Docs](https://launch.solana.com/docs/kora/operators)
+- [Kora Getting Started](https://launch.solana.com/docs/kora/getting-started)
 - [Solana Account Model](https://solana.com/docs/core/accounts)
-- [Solana RPC API](https://solana.com/docs/rpc)
-- [Kora GitHub](https://github.com/solana-foundation/kora)
+- [Solana JSON RPC API](https://solana.com/docs/rpc)
 
----
+## License
 
-**Built for the Superteam Bounty** 🚀
-# kora-rent-reclaim-bot
+MIT

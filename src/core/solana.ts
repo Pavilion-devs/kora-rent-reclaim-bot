@@ -10,6 +10,7 @@ import {
   AccountInfo,
   ParsedAccountData,
 } from '@solana/web3.js';
+import { createCloseAccountInstruction } from '@solana/spl-token';
 import * as fs from 'fs';
 import { getConfig } from '../utils/config';
 import log from '../utils/logger';
@@ -351,9 +352,43 @@ export async function closeAccountAndReclaimRent(
         success: true,
         lamportsReclaimed: lamportsToReclaim,
       };
+    } else if (
+      accountInfo.owner.equals(TOKEN_PROGRAM_ID) ||
+      accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID)
+    ) {
+      // Token account - use SPL Token close instruction
+      const programId = accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID)
+        ? TOKEN_2022_PROGRAM_ID
+        : TOKEN_PROGRAM_ID;
+
+      const transaction = new Transaction().add(
+        createCloseAccountInstruction(
+          account,
+          destination,
+          authority.publicKey,
+          [],
+          programId
+        )
+      );
+
+      const signature = await sendAndConfirmTransaction(conn, transaction, [authority], {
+        commitment: 'confirmed',
+      });
+
+      log.transaction('Token account closed and rent reclaimed', {
+        signature,
+        account: account.toBase58(),
+        lamportsReclaimed: lamportsToReclaim,
+        programId: programId.toBase58(),
+      });
+
+      return {
+        signature,
+        success: true,
+        lamportsReclaimed: lamportsToReclaim,
+      };
     } else {
-      // Program-owned account - need specific close instruction
-      // This is a placeholder - actual implementation depends on the program
+      // Other program-owned account - cannot close generically
       return {
         signature: '',
         success: false,
